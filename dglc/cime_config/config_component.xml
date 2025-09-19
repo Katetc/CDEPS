@@ -12,8 +12,9 @@
        This file may have glc desc entries.
   -->
   <description modifier_mode="1">
-    <desc glc="DGLC[%NOEVOLVE]">Data glc model (DGLC) </desc>
+    <desc glc="DGLC[%NOEVOLVE%STORE]">Data glc model (DGLC) </desc>
     <desc option="NOEVOLVE">no evolve mode </desc>
+    <desc option="STORE">ice storage mode </desc>
   </description>
 
   <entry id="COMP_GLC">
@@ -27,19 +28,22 @@
 
   <entry id="DGLC_MODE">
     <type>char</type>
-    <valid_values>noevolve</valid_values>
+    <valid_values>noevolve,store</valid_values>
     <default_value>noevolve</default_value>
     <values match="last">
       <value compset="DGLC%NOEVOLVE">noevolve</value>
+      <value compset="DGLC%STORE">store</value>
     </values>
     <group>run_component_dglc</group>
     <file>env_run.xml</file>
     <desc>
-      NOEVOLVE mode is used in CESM as follows.
-      In typical runs, CISM is not evolving; CLM computes the surface mass
-      balance (SMB) and sends it to CISM, but CISM’s ice sheet geometry
-      remains fixed over the course of the run. In these runs, CISM serves
-      two roles in the system:
+      NOEVOLVE mode accepts the surface mass balance (SMB) from CTSM, performs
+      a simple hole-filling algorithm to attempt to prevent negative ice fluxes
+      from reaching the ocean, and then passes this directly on to ROF as solid
+      ice discharge. This simulates an un-changing icesheet with no storage. 
+      STORE mode contains the same logic as NOEVOLVE, but releases the ice
+      inputs from CTSM 10 years after they are recieved. This 10 year lag
+      simulates some limited ice storage within the ice sheet.
     </desc>
   </entry>
 

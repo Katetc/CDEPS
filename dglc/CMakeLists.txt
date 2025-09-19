@@ -1,6 +1,7 @@
 project(dglc Fortran)
 set(SRCFILES glc_comp_nuopc.F90
-             dglc_datamode_noevolve_mod.F90)
+             dglc_datamode_noevolve_mod.F90
+	     dglc_datamode_store_mod.F90)
 
 foreach(FILE ${SRCFILES})
   if(EXISTS "${CASEROOT}/SourceMods/src.dglc/${FILE}")

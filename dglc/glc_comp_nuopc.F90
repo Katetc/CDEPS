@@ -48,6 +48,11 @@ module cdeps_dglc_comp
   use dglc_datamode_noevolve_mod, only : dglc_datamode_noevolve_advance
   use dglc_datamode_noevolve_mod, only : dglc_datamode_noevolve_restart_read
   use dglc_datamode_noevolve_mod, only : dglc_datamode_noevolve_restart_write
+  use dglc_datamode_store_mod, only : dglc_datamode_store_advertise
+  use dglc_datamode_store_mod, only : dglc_datamode_store_init_pointers
+  use dglc_datamode_store_mod, only : dglc_datamode_store_advance
+  use dglc_datamode_store_mod, only : dglc_datamode_store_restart_read
+  use dglc_datamode_store_mod, only : dglc_datamode_store_restart_write
 
   implicit none
   private ! except
@@ -281,8 +286,10 @@ contains
     num_icesheets = bcasttmp(2)
 
     ! Validate datamode
-    if ( trim(datamode) == 'noevolve') then  ! read stream, no import data
-      ! do nothing
+    if ( trim(datamode) == 'noevolve') then
+      ! do nothing to validate
+    elseif ( trim(datamode) == 'store') then
+      ! do nothing to validate
     else
        call shr_log_error(' ERROR illegal dglc datamode = '//trim(datamode), rc=rc)
        return
@@ -306,6 +313,10 @@ contains
     ! Advertise dglc fields
     if (trim(datamode)=='noevolve') then
        call dglc_datamode_noevolve_advertise(NStateExp, fldsexport, NStateImp, fldsimport, &
+            flds_scalar_name, rc)
+      if (ChkErr(rc,__LINE__,u_FILE_u)) return
+    elseif (trim(datamode)=='store') then
+        call dglc_datamode_store_advertise(NStateExp, fldsexport, NStateImp, fldsimport, &
             flds_scalar_name, rc)
       if (ChkErr(rc,__LINE__,u_FILE_u)) return
     end if
@@ -403,6 +414,9 @@ contains
 
        ! Initialize stream data type
        if (trim(datamode) /= 'noevolve') then
+          call shr_strdata_init_from_config(sdat(ns), streamfilename, model_meshes(ns), clock, 'GLC', logunit, rc=rc)
+          if (ChkErr(rc,__LINE__,u_FILE_u)) return
+       elseif (trim(datamode) /= 'store') then
           call shr_strdata_init_from_config(sdat(ns), streamfilename, model_meshes(ns), clock, 'GLC', logunit, rc=rc)
           if (ChkErr(rc,__LINE__,u_FILE_u)) return
        end if
@@ -549,6 +563,9 @@ contains
       if (trim(datamode) /= 'noevolve') then
         call dglc_init_dfields(rc=rc)
         if (ChkErr(rc,__LINE__,u_FILE_u)) return
+      elseif (trim(datamode) /= 'store') then
+        call dglc_init_dfields(rc=rc)
+        if (ChkErr(rc,__LINE__,u_FILE_u)) return
       end if
 
       ! Initialize datamode module ponters
@@ -556,17 +573,35 @@ contains
       case('noevolve')
         call dglc_datamode_noevolve_init_pointers(NStateExp, NStateImp, rc)
         if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      end select
 
-      ! Read restart if needed
-      if (restart_read .and. .not. skip_restart_read) then
+        ! Read restart if needed
+        if (restart_read .and. .not. skip_restart_read) then
          call shr_get_rpointer_name(gcomp, 'glc', target_ymd, target_tod, rpfile, 'read', rc)
          if (ChkErr(rc,__LINE__,u_FILE_u)) return
          call dglc_datamode_noevolve_restart_read(model_meshes, restfilm, rpfile, &
               logunit, my_task, main_task, mpicom, &
               sdat(1)%pio_subsystem, sdat(1)%io_type, nx_global, ny_global, rc)
          if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      end if
+      
+        end if
+
+      case('store')
+        call dglc_datamode_store_init_pointers(NStateExp, NStateImp, rc)
+        if (ChkErr(rc,__LINE__,u_FILE_u)) return
+
+        ! Read restart if needed
+        if (restart_read .and. .not. skip_restart_read) then
+         call shr_get_rpointer_name(gcomp, 'glc', target_ymd, target_tod, rpfile, 'read', rc)
+         if (ChkErr(rc,__LINE__,u_FILE_u)) return
+         call dglc_datamode_store_restart_read(model_meshes, restfilm, rpfile, &
+              logunit, my_task, main_task, mpicom, &
+              sdat(1)%pio_subsystem, sdat(1)%io_type, nx_global, ny_global, rc)
+         if (ChkErr(rc,__LINE__,u_FILE_u)) return
+        end if
+
+      end select
+
+
 
       ! Reset first_time
       first_time = .false.
@@ -576,7 +611,7 @@ contains
     ! Update export (and possibly import data model states)
     !--------------------
 
-    if (trim(datamode) /= 'noevolve') then
+    if (trim(datamode) /= 'noevolve' .and. trim(datamode) /= 'store') then
       if (.not. allocated(dfields_icesheets)) then
         allocate(dfields_icesheets(num_icesheets))
       end if
@@ -607,6 +642,12 @@ contains
               logunit, model_meshes, model_internal_gridsize, model_datafiles, rc)
          if (ChkErr(rc,__LINE__,u_FILE_u)) return
       end if
+    case('store')
+      if (valid_inputs) then
+         call dglc_datamode_store_advance(gcomp, sdat(1)%pio_subsystem, sdat(1)%io_type, sdat(1)%io_format, &
+              logunit, model_meshes, model_internal_gridsize, model_datafiles, rc)
+         if (ChkErr(rc,__LINE__,u_FILE_u)) return
+      end if
     end select
 
     ! Write restarts if needed
@@ -622,7 +663,18 @@ contains
               inst_suffix, target_ymd, target_tod, logunit, my_task, main_task, &
               sdat(1)%pio_subsystem, sdat(1)%io_type, nx_global, ny_global, rc)
          if (ChkErr(rc,__LINE__,u_FILE_u)) return
+      elseif (trim(datamode) == 'store') then
+         if (my_task == main_task) then
+            write(logunit,'(a)') 'calling dglc_datamode_store_restart_write'
+         end if
+         call shr_get_rpointer_name(gcomp, 'glc', target_ymd, target_tod, rpfile, 'write', rc)
+         if (ChkErr(rc,__LINE__,u_FILE_u)) return
+         call dglc_datamode_store_restart_write(model_meshes, case_name, rpfile, &
+              inst_suffix, target_ymd, target_tod, logunit, my_task, main_task, &
+              sdat(1)%pio_subsystem, sdat(1)%io_type, nx_global, ny_global, rc)
+         if (ChkErr(rc,__LINE__,u_FILE_u)) return
       end if
+
     end if
 
     ! Write diagnostics
