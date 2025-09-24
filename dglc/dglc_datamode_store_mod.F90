@@ -23,6 +23,7 @@ module dglc_datamode_store_mod
    use pio              , only : pio_createfile, pio_def_dim, pio_def_var, pio_put_att, pio_fill
    use pio              , only : pio_set_fill, pio_put_att, pio_enddef, pio_write_darray, PIO_GLOBAL
    use pio              , only : pio_seterrorhandling
+   use dglc_datamode_store_smbbuf_mod, only: smbbuf
 
    implicit none
    private ! except
@@ -71,6 +72,10 @@ module dglc_datamode_store_mod
    character(len=*), parameter :: field_in_qice                    = 'Flgl_qice'
    character(len=*), parameter :: field_in_so_t_depth              = 'So_t_depth'
    character(len=*), parameter :: field_in_so_s_depth              = 'So_s_depth'
+
+   ! Storage Buffers for lagging ice runoff
+   type(smbbuf), allocatable :: lag_buf_smb(:)
+   type(smbbuf), allocatable :: lag_buf_mask(:)  
 
    character(*) , parameter :: nullstr = 'null'
    character(*) , parameter :: u_FILE_u = &
@@ -157,6 +162,7 @@ contains
 
       ! local variables
       integer :: ns
+      integer :: lsize     ! local size
       character(len=*), parameter :: subname='(dglc_init_pointers): '
       !-------------------------------------------------------------------------------
 
@@ -199,6 +205,9 @@ contains
       ! initialize pointers to import fields if appropriate
       allocate(Sl_tsrf(num_icesheets))
       allocate(Flgl_qice(num_icesheets))
+      ! initialize storage buffer DDTs
+      allocate(lag_buf_smb(num_icesheets))
+      allocate(lag_buf_mask(num_icesheets))
 
       do ns = 1,num_icesheets
          if (.not. NUOPC_IsConnected(NStateImp(ns), fieldName=field_in_tsrf)) then
@@ -214,6 +223,9 @@ contains
 
          Sl_tsrf(ns)%ptr(:) = SHR_CONST_TKFRZ
          Flgl_qice(ns)%ptr(:) = 0._r8
+         lsize = size(Flgl_qice(ns)%ptr)
+         call lag_buf_smb(ns)%initialize(lsize, 0._r8)
+         call lag_buf_mask(ns)%initialize(lsize, 0._r8)
       end do
 
    end subroutine dglc_datamode_store_init_pointers
@@ -253,6 +265,7 @@ contains
       integer                :: nxg, nyg
       real(r8), pointer      :: topog(:)
       real(r8), pointer      :: thck(:)
+      real(r8), allocatable  :: tmp_ice_out(:)
       logical                :: exists
       real(r8)               :: rhoi      ! density of ice ~ kg/m^3
       real(r8)               :: rhoo      ! density of sea water ~ kg/m^3
@@ -429,6 +442,8 @@ contains
                  reduceflag=ESMF_REDUCE_SUM, rc=rc)
             if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
+            allocate(tmp_ice_out(lsize))
+
             ! If there's more positive than negative, then set all
             ! negative to zero and destribute the negative flux amount
             ! across the positive values, scaled by the size of the
@@ -440,12 +455,12 @@ contains
                   if (Sg_icemask_coupled_fluxes(ns)%ptr(ng) > 0.d0) then
                      if(Flgl_qice(ns)%ptr(ng) > 0.d0) then
                         rat = Flgl_qice(ns)%ptr(ng)/Tot_pos_smb(1)
-                        Fgrg_rofi(ns)%ptr(ng) = Flgl_qice(ns)%ptr(ng) + rat*Tot_neg_smb(1)
+                        tmp_ice_out(ng) = Flgl_qice(ns)%ptr(ng) + rat*Tot_neg_smb(1)
                      else
-                        Fgrg_rofi(ns)%ptr(ng) = 0.d0
+                        tmp_ice_out(ng) = 0.d0
                      end if
                   else
-                     Fgrg_rofi(ns)%ptr(ng) = 0.d0
+                     tmp_ice_out(ng) = 0.d0
                   end if
                end do
             else
@@ -457,16 +472,24 @@ contains
                   if (Sg_icemask_coupled_fluxes(ns)%ptr(ng) > 0.d0) then
                      if(Flgl_qice(ns)%ptr(ng) < 0.d0) then
                         rat = Flgl_qice(ns)%ptr(ng)/Tot_neg_smb(1)
-                        Fgrg_rofi(ns)%ptr(ng) = Flgl_qice(ns)%ptr(ng) + rat*Tot_pos_smb(1)
+                        tmp_ice_out(ng) = Flgl_qice(ns)%ptr(ng) + rat*Tot_pos_smb(1)
                      else
-                        Fgrg_rofi(ns)%ptr(ng) = 0.d0
+                        tmp_ice_out(ng) = 0.d0
                      end if
                   else
-                     Fgrg_rofi(ns)%ptr(ng) = 0.d0
+                     tmp_ice_out(ng) = 0.d0
                   end if
                end do
                   
             end if ! More neg or pos smb
+
+            ! Save the hole-filled input smb to be released in 10 years
+            call lag_buf_smb(ns)%set_next_year_val(tmp_ice_out)
+            ! Set the output flux to the value with 10 year lag
+            call lag_buf_smb(ns)%get_lag_year_val(tmp_ice_out)
+            Fgrg_rofi(ns)%ptr(:) = tmp_ice_out(:)
+
+            deallocate(tmp_ice_out)
 
          end do ! Each ice sheet
       end if ! if initialized

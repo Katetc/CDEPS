@@ -413,14 +413,15 @@ contains
        if (ChkErr(rc,__LINE__,u_FILE_u)) return
 
        ! Initialize stream data type
-       if (trim(datamode) /= 'noevolve') then
+       if ( trim(datamode) == 'noevolve') then
+          ! no stream needed  
+       elseif ( trim(datamode) == 'store') then
+          ! no stream needed
+       else
           call shr_strdata_init_from_config(sdat(ns), streamfilename, model_meshes(ns), clock, 'GLC', logunit, rc=rc)
           if (ChkErr(rc,__LINE__,u_FILE_u)) return
-       elseif (trim(datamode) /= 'store') then
-          call shr_strdata_init_from_config(sdat(ns), streamfilename, model_meshes(ns), clock, 'GLC', logunit, rc=rc)
-          if (ChkErr(rc,__LINE__,u_FILE_u)) return
-       end if
-
+       endif
+       
        ! Realize the actively coupled fields, now that a mesh is established and
        ! NUOPC_Realize "realizes" a previously advertised field in the importState and exportState
        ! by replacing the advertised fields with the newly created fields of the same name.
@@ -560,15 +561,12 @@ contains
 
     if (first_time) then
       ! Initialize dfields for all ice sheets
-      if (trim(datamode) /= 'noevolve') then
-        call dglc_init_dfields(rc=rc)
-        if (ChkErr(rc,__LINE__,u_FILE_u)) return
-      elseif (trim(datamode) /= 'store') then
+      if (trim(datamode) /= 'noevolve' .and. trim(datamode) /= 'store') then
         call dglc_init_dfields(rc=rc)
         if (ChkErr(rc,__LINE__,u_FILE_u)) return
       end if
 
-      ! Initialize datamode module ponters
+      ! Initialize datamode module pointers
       select case (trim(datamode))
       case('noevolve')
         call dglc_datamode_noevolve_init_pointers(NStateExp, NStateImp, rc)

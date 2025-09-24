@@ -84,6 +84,8 @@ def _create_namelists(case, confdir, inst_string, infile, nmlgen, data_list_path
 
     if 'noevolve' in dglc_mode:
         generate_stream_file = False
+    elif 'store' in dglc_mode:
+        generate_stream_file = False
     else:
         generate_stream_file = True
     #endif
